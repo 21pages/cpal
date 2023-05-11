@@ -89,6 +89,7 @@ impl Stream {
         D: FnMut(&Data, &InputCallbackInfo) + Send + 'static,
         E: FnMut(StreamError) + Send + 'static,
     {
+        println!("new_input 1");
         let pending_scheduled_event = unsafe {
             Threading::CreateEventA(None, false, false, windows::core::PCSTR(ptr::null()))
         }
@@ -101,6 +102,7 @@ impl Stream {
             commands: rx,
         };
 
+        println!("new_input 2");
         let thread = thread::Builder::new()
             .name("cpal_wasapi_in".to_owned())
             .spawn(move || run_input(run_context, &mut data_callback, &mut error_callback))
@@ -271,7 +273,13 @@ fn run_input(
     error_callback: &mut dyn FnMut(StreamError),
 ) {
     loop {
-        match process_commands_and_await_signal(&mut run_ctxt, error_callback) {
+        let result = process_commands_and_await_signal(&mut run_ctxt, error_callback);
+        println!(
+            "run_input process_commands_and_await_signal result: {:?}",
+            result.is_none()
+        );
+
+        match result {
             Some(ControlFlow::Break) => break,
             Some(ControlFlow::Continue) => continue,
             None => (),
@@ -364,6 +372,7 @@ fn process_input(
     error_callback: &mut dyn FnMut(StreamError),
 ) -> ControlFlow {
     unsafe {
+        println!("process_input 1");
         // Get the available data in the shared buffer.
         let mut buffer: *mut u8 = ptr::null_mut();
         let mut flags = mem::MaybeUninit::uninit();
@@ -383,6 +392,10 @@ fn process_input(
                 flags.as_mut_ptr(),
                 None,
                 Some(&mut qpc_position),
+            );
+            println!(
+                "process_input frames_available:{}, result:{:?}",
+                frames_available, result
             );
 
             match result {
@@ -410,8 +423,11 @@ fn process_input(
                     return ControlFlow::Break;
                 }
             };
+            println!("timestamp ok");
+
             let info = InputCallbackInfo { timestamp };
             data_callback(&data, &info);
+            println!("data_callback");
 
             // Release the buffer.
             let result = capture_client

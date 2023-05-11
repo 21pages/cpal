@@ -70,9 +70,9 @@ fn main() -> Result<(), anyhow::Error> {
 
     // Set up the input device and stream with the default input config.
     let device = if opt.device == "default" {
-        host.default_input_device()
+        host.default_output_device()
     } else {
-        host.input_devices()?
+        host.output_devices()?
             .find(|x| x.name().map(|y| y == opt.device).unwrap_or(false))
     }
     .expect("failed to find input device");
@@ -80,7 +80,7 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Input device: {}", device.name()?);
 
     let config = device
-        .default_input_config()
+        .default_output_config()
         .expect("Failed to get default input config");
     println!("Default input config: {:?}", config);
 
