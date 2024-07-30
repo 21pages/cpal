@@ -6,6 +6,11 @@
 //! Uses a delay of `LATENCY_MS` milliseconds in case the default input and output streams are not
 //! precisely synchronised.
 
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::{
@@ -118,7 +123,14 @@ fn main() -> anyhow::Result<()> {
         producer.try_push(0.0).unwrap();
     }
 
+    let mut input_instant: Option<std::time::Instant> = None;
+    let inputs: Arc<Mutex<Vec<Duration>>> = Default::default();
+    let inputs_clone = inputs.clone();
     let input_data_fn = move |data: &[f32], _: &cpal::InputCallbackInfo| {
+        if let Some(instant) = input_instant {
+            inputs_clone.lock().unwrap().push(instant.elapsed());
+        }
+        input_instant = Some(std::time::Instant::now());
         let mut output_fell_behind = false;
         for &sample in data {
             if producer.try_push(sample).is_err() {
@@ -130,7 +142,14 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    let mut output_instant: Option<std::time::Instant> = None;
+    let outputs: Arc<Mutex<Vec<Duration>>> = Default::default();
+    let outputs_clone = outputs.clone();
     let output_data_fn = move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        if let Some(instant) = output_instant {
+            outputs_clone.lock().unwrap().push(instant.elapsed());
+        }
+        output_instant = Some(std::time::Instant::now());
         let mut input_fell_behind = false;
         for sample in data {
             *sample = match consumer.try_pop() {
@@ -163,15 +182,69 @@ fn main() -> anyhow::Result<()> {
     input_stream.play()?;
     output_stream.play()?;
 
-    // Run for 3 seconds before closing.
-    println!("Playing for 3 seconds... ");
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    let time = 90;
+    println!("Playing for {time} seconds... ");
+    std::thread::sleep(std::time::Duration::from_secs(time));
     drop(input_stream);
     drop(output_stream);
     println!("Done!");
+
+    let input_count = inputs.lock().unwrap().len();
+    let output_count = outputs.lock().unwrap().len();
+
+    let inputs_sum = inputs.lock().unwrap().iter().sum::<std::time::Duration>();
+    let outputs_sum = outputs.lock().unwrap().iter().sum::<std::time::Duration>();
+
+    println!(
+        "Input stream timings: {:?}",
+        inputs_sum / input_count as u32
+    );
+    println!(
+        "output stream timings: {:?}",
+        outputs_sum / output_count as u32
+    );
+
     Ok(())
 }
 
 fn err_fn(err: cpal::StreamError) {
     eprintln!("an error occurred on stream: {}", err);
 }
+
+/*
+
+3s:
+
+Using input device: "麦克风阵列 (Realtek(R) Audio)"
+Using output device: "扬声器 (Realtek(R) Audio)"
+Attempting to build both streams with f32 samples and `StreamConfig { channels: 2, sample_rate: SampleRate(48000), buffer_size: Default }`.
+Successfully built streams.
+Starting the input and output streams with `150` milliseconds of latency.
+Playing for 3 seconds...
+Done!
+Input stream timings: 10.008363ms
+output stream timings: 10.647124ms
+
+30s:
+Using input device: "麦克风阵列 (Realtek(R) Audio)"
+Using output device: "扬声器 (Realtek(R) Audio)"
+Attempting to build both streams with f32 samples and `StreamConfig { channels: 2, sample_rate: SampleRate(48000), buffer_size: Default }`.
+Successfully built streams.
+Starting the input and output streams with `150` milliseconds of latency.
+Playing for 30 seconds...
+Done!
+Input stream timings: 9.999472ms
+output stream timings: 10.664227ms
+
+90s:
+Using input device: "麦克风阵列 (Realtek(R) Audio)"
+Using output device: "扬声器 (Realtek(R) Audio)"
+Attempting to build both streams with f32 samples and `StreamConfig { channels: 2, sample_rate: SampleRate(48000), buffer_size: Default }`.
+Successfully built streams.
+Starting the input and output streams with `150` milliseconds of latency.
+Playing for 90 seconds...
+Done!
+Input stream timings: 10.000525ms
+output stream timings: 10.665383ms
+
+*/
